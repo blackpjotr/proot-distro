@@ -42,13 +42,14 @@ fi
 GIT_RELEASE_URL="https://github.com/termux/proot-distro/releases/download/${CURRENT_VERSION}"
 
 # Normalize architecture names.
-# Prefer aarch64,arm,i686,x86_64 architecture names just like used by
-# termux-packages.
+# Prefer aarch64, arm, i686, riscv64, x86_64 architecture names
+# just like used by termux-packages.
 translate_arch() {
 	case "$1" in
 		aarch64|arm64) echo "aarch64";;
 		arm|armel|armhf|armhfp|armv7|armv7l|armv7a|armv8l) echo "arm";;
 		386|i386|i686|x86) echo "i686";;
+		riscv64) echo "riscv64";;
 		amd64|x86_64) echo "x86_64";;
 		*)
 			echo "translate_arch(): unknown arch '$1'" >&2
@@ -57,10 +58,36 @@ translate_arch() {
 	esac
 }
 
+# Common way to archive the rootfs.
+# Usage: archive_rootfs /path/to/rootfs.tar.xz rootfs-dir
+# rootfs-dir is relative to $WORKDIR
+archive_rootfs() {
+	SOURCE_DATE_EPOCH="${SOURCE_DATE_EPOCH:-$(date +%s)}"
+	echo "SOURCE_DATE_EPOCH: ${SOURCE_DATE_EPOCH}"
+
+	sudo rm -f "${1}.tmp"
+	sudo tar \
+		--directory="$WORKDIR" \
+		--create \
+		--sort=name \
+		--hard-dereference \
+		--mtime="@${SOURCE_DATE_EPOCH}" \
+		--numeric-owner \
+		--preserve-permissions \
+		--acls \
+		--xattrs \
+		--xattrs-include='*' \
+		--xz \
+		--file="${1}.tmp" \
+		"$2"
+	sudo chown $(id -un):$(id -gn) "${1}.tmp"
+	mv "${1}.tmp" "${1}"
+}
+
 ##############################################################################
 
 # Reset workspace. This also deletes any previously made rootfs tarballs.
-sudo rm -rf "${ROOTFS_DIR:?}" "${WORKDIR:?}"
+sudo rm -rf "${WORKDIR:?}"
 mkdir -p "$ROOTFS_DIR" "$WORKDIR"
 cd "$WORKDIR"
 

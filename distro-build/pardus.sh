@@ -1,22 +1,28 @@
 dist_name="Pardus"
-dist_version="yirmibir"
+dist_version="yirmiuc"
 
 bootstrap_distribution() {
+	sudo rm -f "${ROOTFS_DIR}"/pardus-*.tar.xz
+
+	curl -LO https://depo.pardus.org.tr/pardus/pool/main/p/pardus-archive-keyring/pardus-archive-keyring_2021.1_all.deb
+	sudo dpkg -i pardus-archive-keyring_2021.1_all.deb
+	rm pardus-archive-keyring_2021.1_all.deb
+
 	for arch in arm64 i386 amd64; do
-		wget https://depo.pardus.org.tr/pardus/pool/main/p/pardus-archive-keyring/pardus-archive-keyring_2021.1_all.deb
-		sudo dpkg -i pardus-archive-keyring_2021.1_all.deb
-		rm pardus-archive-keyring_2021.1_all.deb
+		sudo rm -rf "${WORKDIR}/pardus-$(translate_arch "$arch")"
 		sudo mmdebstrap \
 			--architectures=${arch} \
 			--variant=minbase \
 			--components="main,contrib,non-free" \
 			--include="ca-certificates,libsystemd0,pardus-archive-keyring,systemd-sysv" \
-			--format=tar \
-			"${dist_version}" \
-			"${ROOTFS_DIR}/pardus-$(translate_arch "$arch")-pd-${CURRENT_VERSION}.tar" \
-			https://depo.pardus.org.tr/pardus
-		sudo chown $(id -un):$(id -gn) "${ROOTFS_DIR}/pardus-$(translate_arch "$arch")-pd-${CURRENT_VERSION}.tar"
-		xz "${ROOTFS_DIR}/pardus-$(translate_arch "$arch")-pd-${CURRENT_VERSION}.tar"
+			--format=directory \
+			"${dist_version}-deb" \
+			"${WORKDIR}/pardus-$(translate_arch "$arch")" \
+			"deb http://depo.pardus.org.tr/pardus yirmiuc main contrib non-free non-free-firmware" \
+			"deb http://depo.pardus.org.tr/pardus yirmiuc-deb main contrib non-free non-free-firmware" \
+			"deb http://depo.pardus.org.tr/guvenlik yirmiuc-deb main contrib non-free non-free-firmware"
+		archive_rootfs "${ROOTFS_DIR}/pardus-$(translate_arch "$arch")-pd-${CURRENT_VERSION}.tar.xz" \
+			"pardus-$(translate_arch "$arch")"
 	done
 	unset arch
 }
@@ -26,7 +32,8 @@ write_plugin() {
 	# This is a default distribution plug-in.
 	# Do not modify this file as your changes will be overwritten on next update.
 	# If you want customize installation, please make a copy.
-	DISTRO_NAME="Pardus (${dist_version})"
+	DISTRO_NAME="Pardus"
+	DISTRO_COMMENT="Version '${dist_version}'."
 
 	TARBALL_URL['aarch64']="${GIT_RELEASE_URL}/pardus-aarch64-pd-${CURRENT_VERSION}.tar.xz"
 	TARBALL_SHA256['aarch64']="$(sha256sum "${ROOTFS_DIR}/pardus-aarch64-pd-${CURRENT_VERSION}.tar.xz" | awk '{ print $1}')"

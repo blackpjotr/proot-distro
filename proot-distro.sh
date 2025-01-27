@@ -1,9 +1,11 @@
 #!@TERMUX_PREFIX@/bin/bash
+# shellcheck disable=SC2239
 ##
-## Script for managing PRoot containers with Linux distributions.
+## Proot-Distro is a script for managing proot containers on Termux.
 ##
-## Originally created by Leonid Pliushch <sylirre@termux.dev> for Termux
-## project.
+## !!!        THIS IS NOT A REPLACEMENT FOR PROOT UTILITY        !!!
+##
+## Originally created by Sylirre <sylirre@termux.dev> for Termux project.
 ##
 ## This program is free software: you can redistribute it and/or modify
 ## it under the terms of the GNU General Public License as published by
@@ -19,266 +21,7 @@
 ## along with this program. If not, see <http://www.gnu.org/licenses/>.
 ##
 
-PROGRAM_VERSION="3.18.1"
-
-#############################################################################
-##
-## >>> CONTRIBUTOR'S NOTICE <<<
-##
-## By contributing to the PRoot-Distro project you are obligated to follow
-## the next mandatory rules:
-##
-## 1. The PRoot-Distro project is built around PRoot and is intended to be
-##    developed as a wrapper around PRoot. Supporting classical Linux chroot
-##    is outside of the project scope.
-##
-## 2. The PRoot-Distro is designed to work only in Termux. Supporting other
-##    distributions where PRoot is available is out of scope.
-##
-## 3. The PRoot-Distro is intended to be used by a non-root user. Using it
-##    as superuser (root) is possible but has a potential of messing up
-##    ownership of Termux environment directories and in some cases it also
-##    may wipe Android device data completely.
-##
-##    The measures such as checking current user id must be used to prevent
-##    using PRoot-Distro by the root user.
-##
-## 4. PRoot-Distro is not a generic tool. Its idea is to provide user a
-##    high level intrument for managing Linux distributions for PRoot and
-##    hide the all underlying routines and automate everything that is
-##    possible. It is not all-in-one swiss-knife framework for PRoot.
-##    Therefore PRoot-Distro does not provide a way to modify its behavior.
-##
-## ***
-##
-## 5. Follow the general design.
-##
-##    Proot Distro has a specific, well defined structure which makes it
-##    unique and separates from analogous projects. This structure expected
-##    to be followed during whole project lifetime. If you have ideas
-##    how to restructure the PRoot-Distro, then please keep them in your
-##    own fork! Source customization is not welcome.
-##
-## 5.1 PRoot-Distro is written in Bash script language with using features
-##     which are not compatible with POSIX shell. The script itself is
-##     monolithic and is not supposed to be split on multiple parts.
-##
-## 5.2 The tabs must be used for indenting code blocks everywhere.
-##
-## 5.3 All features are split on functions. There are 3 types of functions:
-##
-##     * Commands: implement specific features of PRoot-Distro such as
-##       install, backup, login the distribution. These functions have
-##       following name scheme: 'command_name()'.
-##     * Command help: supplementary functions implementing informational
-##       output describing usage of PRoot-Distro commands. These functions
-##       are named as 'command_name_help()' and are defined AFTER the
-##       commands.
-##     * Utility functions: reusable or very long pieces of code.
-##
-## 5.4 Each command function definition should begin with comment section.
-##
-##     Comment sections logically separate functions on groups and provide
-##     a brief overview which part of PRoot-Distro is implemented here. The
-##     comment must provide a description of how the function works.
-##
-##     Utility functions are allowed to have a very brief description and
-##     command help functions.
-##
-##     Command help functions should not have comments. They are self
-##     descriptive.
-##
-## 5.5 Code pieces that do non-obvious actions must be commented.
-##
-## 5.6 Functions are not allowed to define global variables. Use 'local'
-##     keyword to define the local variables instead.
-##
-## 5.7 Global variables must be defined either at beginning of PRoot-Distro
-##     script or at the entry point.
-##
-## 5.8 Use of getopt for options handling is considered as non-flexible
-##     and thus not allowed.
-##
-## 5.9 The checks for error conditions must be implemented. If error has
-##     been encountered, a message should be printed on stderr and further
-##     execution should be terminated.
-##
-## 5.10 If error was encountered inside function, exiting should be done
-##      using the command 'return 1' to pass a status code to the caller.
-##      Use of exit command is not allowed unless used in script entry point.
-##
-## 5.11 User input in command functions must be validated during the
-##      command line arguments handling.
-##
-## 5.12 Use heredocs to write files, especially if their content is long.
-##
-## 5.13 Certain configuration such as plug-in directory path may be set only
-##      during installation of the PRoot-Distro. Such configuration is
-##      treated as persistent and should not be changed by user.
-##
-## 5.14 PRoot-Distro uses string place holders to define certain common
-##      values for some variables:
-##
-##      * @TERMUX_APP_PACKAGE@ - sets Termux app package (com.termux).
-##      * @TERMUX_PREFIX@ - sets the installation prefix path.
-##      * @TERMUX_HOME@ - sets the Termux home directory path.
-##
-##      It is not allowed to hardcode the mentioned values instead of using
-##      the place holder.
-##
-## ***
-##
-## 6. All informational messages are printed in specific format.
-##
-## 6.1 Use function 'msg' to print messages.
-##
-## 6.2 Messages printed by help functions must fit in 76 columns. If the
-##     message is too long, split in on multiple lines. This is not relevant
-##     to errors and other informational messages. Pay extra attention to
-##     keep the message properly indented.
-##
-## 6.3 All messages printable by PRoot-Distro script must support colored
-##     text through the escape sequences defined below by variables such as
-##     RED (red), BRED (bold red text), YELLOW, BYELLOW, etc.
-##
-## 6.4 PRoot-Distro operation errors must have bold red color (${BRED}).
-##     The key information such as arguments caused an error should be
-##     encloded in quotes and highlighted by yellow color (${YELLOW}).
-##
-## 6.5 Messages should be terminated by ${RST} which resets the text colors
-##     and other attributes.
-##
-## 6.7 Informational messages produced by PRoot-Distro command steps must
-##     have the following format:
-##
-##     ${BLUE}[${GREEN}*${BLUE}] ${CYAN}Message...${RST}"
-##
-## 6.8 If the step encountered a condition where a warning or error should
-##     be printed, the following message format should be used instead:
-##
-##     ${BLUE}[${RED}!${BLUE}] ${CYAN}Warning message.${RST}
-##
-## ***
-##
-## 7. Handling distributions.
-##
-## 7.1 PRoot-Distro script is intended to be distribution-agnostic. That
-##     means it treats all distributions equally and handles them in the
-##     same way despite the possible differences at level of distribition
-##     root file system package.
-##
-## 7.2 Support of specific distribution is enabled by using a plug-in. The
-##     plug-in is a Bash script that is sourced by PRoot-Distro and has the
-##     following format:
-##
-##     DISTRO_NAME="Example"
-##     DISTRO_COMMENT="Example distribution."
-##
-##     TARBALL_STRIP_OPT=1
-##
-##     TARBALL_URL['aarch64']="https://example.com/archive-aarch64.tar.gz"
-##     TARBALL_URL['arm']="https://example.com/archive-armv7.tar.gz"
-##     TARBALL_URL['i686']="https://example.com/archive-i386.tar.gz"
-##     TARBALL_URL['x86_64']="https://example.com/archive-amd64.tar.gz"
-##
-##     TARBALL_SHA256['aarch64']="0000000000000000000000000000000000000000000000000000000000000000"
-##     TARBALL_SHA256['arm']="0000000000000000000000000000000000000000000000000000000000000000"
-##     TARBALL_SHA256['i686']="0000000000000000000000000000000000000000000000000000000000000000"
-##     TARBALL_SHA256['x86_64']="0000000000000000000000000000000000000000000000000000000000000000"
-##
-##     distro_setup() {
-##         run_proot_cmd touch /etc/hello-world
-##         run_proot_cmd bash -c "echo '127.0.0.1 hello-world' >> /etc/hosts"
-##     }
-##
-## 7.4 The variable DISTRO_NAME specifies a full name of distribution such
-##     as "Ubuntu" or "Debian (stable)". This variable is mandatory.
-##
-## 7.3 The variable TARBALL_URL is a Bash associative array which contains
-##     URLs to distribution rootfs tarball for given CPU architectures.
-##     This variable is mandatory.
-##
-## 7.4 The variable TARBALL_SHA256 is a Bash associative array which
-##     contains SHA-256 checksums of rootfs tarballs for given CPU
-##     architectures. This variable is mandatory.
-##
-## 7.5 Post-installation steps that may be required for some distributions
-##     are defined in 'distro_setup()' function (optional). This function
-##     has access to all variables defined by PRoot-Distro during the
-##     execution of 'command_install()'.
-##
-## 7.6 Commands inside 'distro_setup()' that are intended to be executed in
-##     distribution environment must be defined as arguments of the
-##     command 'run_proot_cmd'.
-##
-## 7.7 Distributions must be adressed by their alias which in fact is a
-##     file name of plug-in except the extension part.
-##
-## 7.8 The alias files are located in $PREFIX/etc/proot-distro and have
-##     extensions .sh or .override.sh.
-##
-##     * dist.sh name format is used for standard plug-ins.
-##     * dist2.override.sh name is used to indicate that this is a
-##       renamed distribution created by command 'rename' or by the
-##       option '--override-alias' of command 'install'.
-##
-## 7.9 The alias for distribution must be unique and PRoot-Distro should
-##     take care of that. User should not end with having two plug-ins
-##     for same alias, for example ubuntu.sh and ubuntu.override.sh.
-##
-## 7.10 The rootfs for distribution may be extracted only under PRoot
-##      session with active link2symlink extension.
-##
-## ***
-##
-## 8. Project versioning: major.minor.patch
-##
-## 8.1 Major version should be incremented when breaking changes were
-##     released. Examples are deprecated features, changed locations of
-##     files, command line format changes.
-##
-## 8.2 Minor version is incremented for significant but non-breaking
-##     changes such as added new features or upgraded distributions. The
-##     minor version is set to 0 when major version was incremented.
-##
-## 8.3 Patch version is incremented for small changes such as improvements
-##     to existing features and bug fixes. It is set to 0 when major or
-##     minor versions were incremented.
-##
-## ***
-##
-## 9. Warranty disclaimer.
-##
-## 9.1 PRoot-Distro has been created with aim to solve a specific range
-##     of tasks and its functionality may not align with your needs.
-##
-## 9.2 PRoot-Distro is a Bash script wrapper for PRoot. If PRoot does not
-##     work on your device, the PRoot-Distro will not work here as well.
-##     You shall not beg the authors of PRoot-Distro to fix the PRoot. Such
-##     requests will be ignored.
-##
-## 9.3 Certain functionality of PRoot-Distro relies on the Internet and
-##     services like GitHub. If you do not have the Internet connection or
-##     the GitHub is blocked by your ISP, then you may not be able to
-##     install distributions. Please do not beg for setting up a censorship
-##     resistant distribution tarball hosts.
-##
-## 9.4 The distributions are provided as-is, possibly with small changes
-##     to set of preinstalled packages and their configuration. Bugs that
-##     may exist in a specific distribution will not be fixed by authors
-##     of the PRoot-Distro.
-##
-## 9.5 PRoot-Distro authors make the final decision whether to accept
-##     submitted patches (pull requests) or not.
-##
-## 9.6 PRoot-Distro authors do not provide the time frames for fullfilling
-##     a specific request (new feature, etc).
-##
-## 9.7 PRoot-Distro does not have upgrade schedule. Authors work on the
-##     project development whenever have opportunity and desire to do so.
-##     Releases are submitted when ready. There no alpha or beta builds.
-##
-#############################################################################
+PROGRAM_VERSION="4.21.0"
 
 #############################################################################
 #
@@ -287,7 +30,11 @@ PROGRAM_VERSION="3.18.1"
 
 set -e -u
 
-PROGRAM_NAME="proot-distro"
+# Override user-defined PATH.
+export PATH="@TERMUX_PREFIX@/bin"
+
+# Reference this where need to retrieve program name.
+PROGRAM_NAME=$(basename "$(realpath "$0")")
 
 # Where distribution plug-ins are stored.
 DISTRO_PLUGINS_DIR="@TERMUX_PREFIX@/etc/proot-distro"
@@ -305,20 +52,29 @@ INSTALLED_ROOTFS_DIR="${RUNTIME_DIR}/installed-rootfs"
 DEFAULT_PRIMARY_NAMESERVER="8.8.8.8"
 DEFAULT_SECONDARY_NAMESERVER="8.8.4.4"
 
+# PATH environment variable for distributions.
+DEFAULT_PATH_ENV="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/local/games:/usr/games:@TERMUX_PREFIX@/bin:/system/bin:/system/xbin"
+
 # Default fake kernel version.
 # Note: faking kernel version is required when using PRoot-Distro on
 # old devices that are not compatible with up-to-date versions of GNU libc.
 DEFAULT_FAKE_KERNEL_VERSION="6.2.1-PRoot-Distro"
 
+# Emulator type for x86_64 systems.
+# Can be either BLINK or QEMU.
+: "${PROOT_DISTRO_X64_EMULATOR:=QEMU}"
+
 # Colors.
-if [ -n "$(command -v tput)" ] && [ $(tput colors) -ge 8 ] && [ -z "${PROOT_DISTRO_FORCE_NO_COLORS-}" ]; then
+if [ -n "$(command -v tput)" ] && [ "$(tput colors 2>/dev/null || echo 0)" -ge 8 ] && [ -z "${PROOT_DISTRO_FORCE_NO_COLORS-}" ]; then
 	RST="$(tput sgr0)"
 	RED="${RST}$(tput setaf 1)"
 	BRED="${RST}$(tput bold)$(tput setaf 1)"
 	GREEN="${RST}$(tput setaf 2)"
 	YELLOW="${RST}$(tput setaf 3)"
 	BYELLOW="${RST}$(tput bold)$(tput setaf 3)"
+	IYELLOW="${RST}$(tput sitm)$(tput setaf 3)"
 	BLUE="${RST}$(tput setaf 4)"
+	MAGENTA="${RST}$(tput setaf 5)"
 	CYAN="${RST}$(tput setaf 6)"
 	BCYAN="${RST}$(tput bold)$(tput setaf 6)"
 	ICYAN="${RST}$(tput sitm)$(tput setaf 6)"
@@ -328,7 +84,9 @@ else
 	GREEN=""
 	YELLOW=""
 	BYELLOW=""
+	IYELLOW=""
 	BLUE=""
+	MAGENTA=""
 	CYAN=""
 	BCYAN=""
 	ICYAN=""
@@ -339,6 +97,9 @@ fi
 # It is expected that all dependencies have fixed hardcoded paths according
 # to Termux file system layout.
 unset LD_PRELOAD
+
+# Override umask
+umask 0022
 
 #############################################################################
 #
@@ -360,8 +121,8 @@ msg() {
 #
 #############################################################################
 
-for i in awk basename bzip2 cat chmod cp curl cut du find grep gzip \
-	head id mkdir proot rm sed tar xargs xz; do
+for i in awk basename bzip2 cat chmod cp curl cut du file find grep gzip \
+	head id lscpu mkdir proot rm sed tar xargs xz; do
 	if [ -z "$(command -v "$i")" ]; then
 		msg
 		msg "${BRED}Utility '${i}' is not installed. Cannot continue.${RST}"
@@ -370,6 +131,20 @@ for i in awk basename bzip2 cat chmod cp curl cut du find grep gzip \
 	fi
 done
 unset i
+
+# Notify user if bin/bash is not a GNU Bash.
+if ! grep -q '^GNU bash' <(bash --version 2>/dev/null | head -n 1); then
+	msg
+	msg "${BRED}Warning: bash binary that is available in PATH appears to be not a GNU bash. You may experience issues during installation, backup and restore operations.${RST}"
+	msg
+fi
+
+# Notify user if tar available in PATH is not GNU tar.
+if ! grep -q '^tar (GNU tar)' <(tar --version 2>/dev/null | head -n 1); then
+	msg
+	msg "${BRED}Warning: tar binary that is available in PATH appears to be not a GNU tar. You may experience issues during installation, backup and restore operations.${RST}"
+	msg
+fi
 
 #############################################################################
 #
@@ -382,9 +157,8 @@ unset i
 
 if [ "$(id -u)" = "0" ]; then
 	msg
-	msg "${BRED}Error: ${PROGRAM_NAME} should not be executed as root user.${RST}"
+	msg "${BRED}Warning: ${PROGRAM_NAME} should not be executed as root user. Do not send bug reports about messed up Termux environment, lost data and bricked devices.${RST}"
 	msg
-	exit 1
 fi
 
 #############################################################################
@@ -407,6 +181,38 @@ if [ "$TRACER_PID" != 0 ]; then
 	unset TRACER_NAME
 fi
 unset TRACER_PID
+
+#############################################################################
+#
+# FUNCTION TO DETECT CPU ARCHITECTURE IN GIVEN DISTRIBUTION
+#
+# Check known executable(s) and return CPU architecture.
+#
+#############################################################################
+
+detect_cpu_arch() {
+	local dist_path="${INSTALLED_ROOTFS_DIR}/${1}"
+	local cpu_arch
+
+	local i
+	for i in bash dash sh su ls sha256sum busybox; do
+		if [ "$(dd if="${dist_path}/bin/${i}" bs=1 skip=1 count=3 2>/dev/null)" = "ELF" ]; then
+			cpu_arch=$(file "$(realpath "${dist_path}/bin/${i}")" | cut -d':' -f2- | cut -d',' -f2 | cut -d' ' -f2-)
+			[ -n "$cpu_arch" ] && break
+		fi
+	done
+
+	case "$cpu_arch" in
+		"ARM aarch64") cpu_arch="aarch64";;
+		"ARM") cpu_arch="arm";;
+		"UCB RISC-V") cpu_arch="riscv64";;
+		"Intel 80386") cpu_arch="i686";;
+		"x86-64") cpu_arch="x86_64";;
+		*) cpu_arch="unknown";;
+	esac
+
+	echo "$cpu_arch"
+}
 
 #############################################################################
 #
@@ -510,15 +316,9 @@ command_install() {
 		msg
 		msg "${BRED}Error: unknown distribution '${YELLOW}${distro_name}${BRED}' was requested to be installed.${RST}"
 		msg
-		msg "${CYAN}Run '${GREEN}${PROGRAM_NAME} list${CYAN}' to see the supported distributions.${RST}"
+		msg "${CYAN}View supported distributions by: ${GREEN}${PROGRAM_NAME} list${RST}"
 		msg
 		return 1
-	fi
-
-	if grep -qiP '(kali|parrot|nethunter|blackarch)' <<< "$distro_name" || grep -qiP '^nh$' <<< "$distro_name"; then
-		# Redirect user to a safe distrubution.
-		msg "${BLUE}[${GREEN}*${BLUE}] ${CYAN}Distribution '${YELLOW}${distro_name}${CYAN}' known to be used by hax and therefore is not safe. Redirecting to '${YELLOW}ubuntu${CYAN}'...${RST}"
-		distro_name="ubuntu"
 	fi
 
 	if [ -n "${override_alias-}" ]; then
@@ -556,21 +356,16 @@ command_install() {
 	fi
 
 	if [ -f "${distro_plugin_script}" ]; then
-		# Notify user if tar available in PATH is not GNU tar.
-		if ! grep -q 'tar (GNU tar)' <(tar --version 2>/dev/null | head -n 1); then
-			msg
-			msg "${BRED}Warning: tar binary that is available in PATH appears to be not a GNU tar. You may experience issues during installation, backup and restore operations.${RST}"
-			msg
-		fi
-
 		msg "${BLUE}[${GREEN}*${BLUE}] ${CYAN}Installing ${YELLOW}${SUPPORTED_DISTRIBUTIONS["$distro_name"]}${CYAN}...${RST}"
 
 		# Make sure things are cleared up on failure or user requested exit.
-		trap "echo -e \"\\r\\e[2K${BLUE}[${RED}!${BLUE}] ${CYAN}Exiting due to failure.${RST}\"; rm -rf \"${INSTALLED_ROOTFS_DIR:?}/${distro_name:?}\"; [ -e \"${DISTRO_PLUGINS_DIR}/${distro_name}.override.sh\" ] && rm -f \"${DISTRO_PLUGINS_DIR}/${distro_name}.override.sh\"; exit 1;" EXIT
-		trap "trap - EXIT; echo -e \"\\r\\e[2K${BLUE}[${RED}!${BLUE}] ${CYAN}Exiting immediately as requested.${RST}\"; rm -rf \"${INSTALLED_ROOTFS_DIR:?}/${distro_name:?}\"; [ -e \"${DISTRO_PLUGINS_DIR}/${distro_name}.override.sh\" ] && rm -f \"${DISTRO_PLUGINS_DIR}/${distro_name}.override.sh\"; exit 1;" HUP INT TERM
+		# shellcheck disable=SC2064 # variables must expand here
+		trap "echo -e \"\\r\\e[2K${BLUE}[${RED}!${BLUE}] ${CYAN}Exiting due to failure.${RST}\"; chmod -R u+rwx \"${INSTALLED_ROOTFS_DIR:?}/${distro_name:?}\"; rm -rf \"${INSTALLED_ROOTFS_DIR:?}/${distro_name:?}\"; [ -e \"${DISTRO_PLUGINS_DIR}/${distro_name}.override.sh\" ] && rm -f \"${DISTRO_PLUGINS_DIR}/${distro_name}.override.sh\"; exit 1;" EXIT
+		# shellcheck disable=SC2064 # variables must expand here
+		trap "trap - EXIT; echo -e \"\\r\\e[2K${BLUE}[${RED}!${BLUE}] ${CYAN}Exiting immediately as requested.${RST}\"; chmod -R u+rwx \"${INSTALLED_ROOTFS_DIR:?}/${distro_name:?}\"; rm -rf \"${INSTALLED_ROOTFS_DIR:?}/${distro_name:?}\"; [ -e \"${DISTRO_PLUGINS_DIR}/${distro_name}.override.sh\" ] && rm -f \"${DISTRO_PLUGINS_DIR}/${distro_name}.override.sh\"; exit 1;" HUP INT TERM
 
 		msg "${BLUE}[${GREEN}*${BLUE}] ${CYAN}Creating directory '${INSTALLED_ROOTFS_DIR}/${distro_name}'...${RST}"
-		mkdir -m 755 -p "${INSTALLED_ROOTFS_DIR}/${distro_name}"
+		mkdir -p "${INSTALLED_ROOTFS_DIR}/${distro_name}"
 
 		export PROOT_L2S_DIR="${INSTALLED_ROOTFS_DIR}/${distro_name}/.l2s"
 		if [ ! -d "${INSTALLED_ROOTFS_DIR}/${distro_name}/.l2s" ]; then
@@ -583,6 +378,7 @@ command_install() {
 		TARBALL_URL["aarch64"]=""
 		TARBALL_URL["arm"]=""
 		TARBALL_URL["i686"]=""
+		TARBALL_URL["riscv64"]=""
 		TARBALL_URL["x86_64"]=""
 
 		# This should be overridden in distro plug-in with valid SHA-256
@@ -590,6 +386,7 @@ command_install() {
 		TARBALL_SHA256["aarch64"]=""
 		TARBALL_SHA256["arm"]=""
 		TARBALL_SHA256["i686"]=""
+		TARBALL_SHA256["riscv64"]=""
 		TARBALL_SHA256["x86_64"]=""
 
 		# If your content inside tarball isn't stored in subdirectory,
@@ -598,6 +395,7 @@ command_install() {
 
 		# Distribution plug-in contains steps on how to get download URL
 		# and further post-installation configuration.
+		# shellcheck disable=SC1090
 		source "${distro_plugin_script}"
 
 		# Cannot proceed without URL and SHA-256.
@@ -622,6 +420,7 @@ command_install() {
 
 		if [ ! -f "${DOWNLOAD_CACHE_DIR}/${tarball_name}" ]; then
 			msg "${BLUE}[${GREEN}*${BLUE}] ${CYAN}Downloading rootfs tarball...${RST}"
+			msg "${BLUE}[${GREEN}*${BLUE}] ${CYAN}URL: ${TARBALL_URL["$DISTRO_ARCH"]}${RST}"
 
 			# Using temporary file as script can't distinguish the partially
 			# downloaded file from the complete. Useful in case if curl will
@@ -668,6 +467,51 @@ command_install() {
 			-xf "${DOWNLOAD_CACHE_DIR}/${tarball_name}" --exclude='dev' |& grep -v "/linkerconfig/" >&2
 		set -e
 
+		# If no /etc in rootfs, terminate installation.
+		# This usually indicates that downloaded distribution tarball doesn't contain
+		# actual rootfs, wrong tar strip option was specified or the distribution has
+		# high grade of customization and doesn't respect FHS standard.
+		if [ ! -e "${INSTALLED_ROOTFS_DIR}/${distro_name}/etc" ]; then
+			msg
+			msg "${BRED}Error: the rootfs of distribution '${YELLOW}${distro_name}${BRED}' has unexpected structure (no /etc directory). Make sure that variable TARBALL_STRIP_OPT specified in distribution plug-in is correct.${RST}"
+			msg
+			return 1
+		fi
+
+		# Write important environment variables to /etc/environment.
+		chmod u+rw "${INSTALLED_ROOTFS_DIR}/${distro_name}/etc/environment" >/dev/null 2>&1 || true
+		msg "${BLUE}[${GREEN}*${BLUE}] ${CYAN}Writing file '${INSTALLED_ROOTFS_DIR}/${distro_name}/etc/environment'...${RST}"
+		for var in ANDROID_ART_ROOT ANDROID_DATA ANDROID_I18N_ROOT ANDROID_ROOT \
+			ANDROID_RUNTIME_ROOT ANDROID_TZDATA_ROOT BOOTCLASSPATH COLORTERM \
+			DEX2OATBOOTCLASSPATH EXTERNAL_STORAGE; do
+			set +u
+			if [ -n "${!var}" ]; then
+				echo "${var}=${!var}" >> "${INSTALLED_ROOTFS_DIR}/${distro_name}/etc/environment"
+			fi
+			set -u
+		done
+		unset var
+		# Don't touch these variables.
+		# TERM is being inherited from currect environment. Otherwise it is being
+		# set to xterm-256color (Termux app default).
+		cat <<- EOF >> "${INSTALLED_ROOTFS_DIR}/${distro_name}/etc/environment"
+		LANG=en_US.UTF-8
+		MOZ_FAKE_NO_SANDBOX=1
+		PATH=${DEFAULT_PATH_ENV}
+		PULSE_SERVER=127.0.0.1
+		TERM=${TERM-xterm-256color}
+		TMPDIR=/tmp
+		EOF
+
+		# Fix PATH in some configuration files.
+		for f in /etc/bash.bashrc /etc/profile /etc/login.defs; do
+			[ ! -e "${INSTALLED_ROOTFS_DIR}/${distro_name}${f}" ] && continue
+			msg "${BLUE}[${GREEN}*${BLUE}] ${CYAN}Updating PATH in '${INSTALLED_ROOTFS_DIR}/${distro_name}${f}' if needed...${RST}"
+			sed -i -E "s@\<(PATH=)(\"?[^\"[:space:]]+(\"|\$|\>))@\1\"${DEFAULT_PATH_ENV}\"@g" \
+				"${INSTALLED_ROOTFS_DIR}/${distro_name}${f}"
+		done
+		unset f
+
 		# Default /etc/resolv.conf may be empty or unsuitable for use.
 		msg "${BLUE}[${GREEN}*${BLUE}] ${CYAN}Creating file '${INSTALLED_ROOTFS_DIR}/${distro_name}/etc/resolv.conf'...${RST}"
 		rm -f "${INSTALLED_ROOTFS_DIR}/${distro_name}/etc/resolv.conf"
@@ -712,8 +556,8 @@ command_install() {
 			fi
 		done < <(paste <(id -Gn | tr ' ' '\n') <(id -G | tr ' ' '\n'))
 
-		# Ensure that proot will be able to bind fake /proc entries.
-		setup_fake_proc
+		# Ensure that proot will be able to bind fake /proc and /sys entries.
+		setup_fake_sysdata
 
 		# Run optional distro-specific hook.
 		if declare -f -F distro_setup >/dev/null 2>&1; then
@@ -729,7 +573,7 @@ command_install() {
 
 		msg "${BLUE}[${GREEN}*${BLUE}] ${CYAN}Finished.${RST}"
 		msg
-		msg "${CYAN}Now run '${GREEN}${PROGRAM_NAME} login $distro_name${CYAN}' to log in.${RST}"
+		msg "${CYAN}Log in with: ${GREEN}${PROGRAM_NAME} login ${distro_name}${CYAN}${RST}"
 		msg
 		return 0
 	else
@@ -744,6 +588,7 @@ command_install() {
 
 # Special function for executing a command inside rootfs.
 # Intended to be used inside plug-in distro_setup() function.
+# shellcheck disable=SC2317 # run_proot_cmd called indirectly
 run_proot_cmd() {
 	if [ -z "${distro_name-}" ]; then
 		msg
@@ -759,73 +604,107 @@ run_proot_cmd() {
 		return 1
 	fi
 
-	local qemu_arg=""
+	local cpu_emulator_arg=""
 	if [ "$DISTRO_ARCH" != "$DEVICE_CPU_ARCH" ]; then
-		local qemu_bin_path=""
+		local cpu_emulator_path=""
 
 		# If CPU and host OS are 64bit, we can run 32bit guest OS without emulation.
 		# Everything else requires emulator (QEMU).
 		case "$DISTRO_ARCH" in
-			aarch64) qemu_bin_path="@TERMUX_PREFIX@/bin/qemu-aarch64";;
+			aarch64) cpu_emulator_path="@TERMUX_PREFIX@/bin/qemu-aarch64";;
 			arm)
-				if [ "$DEVICE_CPU_ARCH" != "aarch64" ]; then
-					qemu_bin_path="@TERMUX_PREFIX@/bin/qemu-arm"
+				if [ "$DEVICE_CPU_ARCH" != "aarch64" ] || ! $SUPPORT_32BIT; then
+					cpu_emulator_path="@TERMUX_PREFIX@/bin/qemu-arm"
 				fi
 				;;
 			i686)
 				if [ "$DEVICE_CPU_ARCH" != "x86_64" ]; then
-					qemu_bin_path="@TERMUX_PREFIX@/bin/qemu-i386"
+					cpu_emulator_path="@TERMUX_PREFIX@/bin/qemu-i386"
 				fi
 				;;
-			x86_64) qemu_bin_path="@TERMUX_PREFIX@/bin/qemu-x86_64";;
+			riscv64) cpu_emulator_path="@TERMUX_PREFIX@/bin/qemu-riscv64";;
+			x86_64)
+				if [ "$PROOT_DISTRO_X64_EMULATOR" = "QEMU" ]; then
+					cpu_emulator_path="@TERMUX_PREFIX@/bin/qemu-x86_64"
+				elif [ "$PROOT_DISTRO_X64_EMULATOR" = "BLINK" ]; then
+					cpu_emulator_path="@TERMUX_PREFIX@/bin/blink"
+				else
+					msg
+					msg "${BRED}Error: PROOT_DISTRO_X64_EMULATOR has unknown value '$PROOT_DISTRO_X64_EMULATOR'. Valid values are: BLINK, QEMU."
+					msg
+				fi
+				;;
 			*)
 				msg
-				msg "${BRED}Error: DISTRO_ARCH has unknown value '$DISTRO_ARCH'. Valid values are: aarch64, arm, i686, x86_64."
+				msg "${BRED}Error: DISTRO_ARCH has unknown value '$DISTRO_ARCH'. Valid values are: aarch64, arm, i686, riscv64, x86_64."
 				msg
 				return 1
 			;;
 		esac
 
-		if [ -n "$qemu_bin_path" ]; then
-			if [ -x "$qemu_bin_path" ]; then
-				qemu_arg="-q ${qemu_bin_path}"
+		if [ -n "$cpu_emulator_path" ]; then
+			if [ -x "$cpu_emulator_path" ]; then
+				cpu_emulator_arg="-q ${cpu_emulator_path}"
 			else
-				local qemu_user_pkg=""
+				local cpu_emulator_pkg=""
 				case "$DISTRO_ARCH" in
-					aarch64) qemu_user_pkg="qemu-user-aarch64";;
-					arm) qemu_user_pkg="qemu-user-arm";;
-					i686) qemu_user_pkg="qemu-user-i386";;
-					x86_64) qemu_user_pkg="qemu-user-x86-64";;
-					*) qemu_user_pkg="qemu-user-${DISTRO_ARCH}";;
+					aarch64) cpu_emulator_pkg="qemu-user-aarch64";;
+					arm) cpu_emulator_pkg="qemu-user-arm";;
+					i686) cpu_emulator_pkg="qemu-user-i386";;
+					riscv64) cpu_emulator_pkg="qemu-user-riscv64";;
+					x86_64)
+						if [ "$PROOT_DISTRO_X64_EMULATOR" = "QEMU" ]; then
+							cpu_emulator_pkg="qemu-user-x86-64"
+						elif [ "$PROOT_DISTRO_X64_EMULATOR" = "BLINK" ]; then
+							cpu_emulator_pkg="blink"
+						else
+							msg
+							msg "${BRED}Error: PROOT_DISTRO_X64_EMULATOR has unknown value '$PROOT_DISTRO_X64_EMULATOR'. Valid values are: BLINK, QEMU."
+							msg
+						fi
+						;;
+					*) cpu_emulator_pkg="qemu-user-${DISTRO_ARCH}";;
 				esac
 				msg
-				msg "${BRED}Error: package '${qemu_user_pkg}' is not installed.${RST}"
+				msg "${BRED}Error: package '${cpu_emulator_pkg}' is not installed.${RST}"
 				msg
 				return 1
 			fi
 		fi
+	else
+		# Warn about CPU not supporting 32-bit instructions
+		if ! $SUPPORT_32BIT; then
+			msg "${BRED}Warning: CPU doesn't support 32-bit instructions, some software may not work.${RST}"
+		fi
 	fi
 
-	if [ -n "$qemu_arg" ]; then
+	if [ -n "$cpu_emulator_arg" ]; then
 		if [ -d "/apex" ]; then
-			qemu_arg="${qemu_arg} --bind=/apex"
+			cpu_emulator_arg="${cpu_emulator_arg} --bind=/apex"
 		fi
 		if [ -e "/linkerconfig/ld.config.txt" ]; then
-			qemu_arg="${qemu_arg} --bind=/linkerconfig/ld.config.txt"
+			cpu_emulator_arg="${cpu_emulator_arg} --bind=/linkerconfig/ld.config.txt"
 		fi
-		qemu_arg="${qemu_arg} --bind=@TERMUX_PREFIX@"
-		qemu_arg="${qemu_arg} --bind=/system"
-		qemu_arg="${qemu_arg} --bind=/vendor"
+		cpu_emulator_arg="${cpu_emulator_arg} --bind=@TERMUX_PREFIX@"
+		cpu_emulator_arg="${cpu_emulator_arg} --bind=/system"
+		cpu_emulator_arg="${cpu_emulator_arg} --bind=/vendor"
 		if [ -f "/plat_property_contexts" ]; then
-			qemu_arg="${qemu_arg} --bind=/plat_property_contexts"
+			cpu_emulator_arg="${cpu_emulator_arg} --bind=/plat_property_contexts"
 		fi
 		if [ -f "/property_contexts" ]; then
-			qemu_arg="${qemu_arg} --bind=/property_contexts"
+			cpu_emulator_arg="${cpu_emulator_arg} --bind=/property_contexts"
 		fi
 	fi
 
-	proot \
-		$qemu_arg -L \
+	# Ensure that proot will be able to bind fake /proc and /sys entries.
+	setup_fake_sysdata
+
+	# With this tools should assume that no SELinux present.
+	set -- "--bind=${INSTALLED_ROOTFS_DIR}/${distro_name}/sys/.empty:/sys/fs/selinux" "$@"
+
+	# shellcheck disable=SC2086 # ${cpu_emulator_arg} should expand into nothing rather than into ''.
+	proot ${cpu_emulator_arg} \
+		-L \
 		--kernel-release="${DEFAULT_FAKE_KERNEL_VERSION}" \
 		--link2symlink \
 		--kill-on-exit \
@@ -846,23 +725,32 @@ run_proot_cmd() {
 		--bind="${INSTALLED_ROOTFS_DIR}/${distro_name}/proc/.version:/proc/version" \
 		--bind="${INSTALLED_ROOTFS_DIR}/${distro_name}/proc/.vmstat:/proc/vmstat" \
 		--bind="${INSTALLED_ROOTFS_DIR}/${distro_name}/proc/.sysctl_entry_cap_last_cap:/proc/sys/kernel/cap_last_cap" \
+		--bind="${INSTALLED_ROOTFS_DIR}/${distro_name}/proc/.sysctl_inotify_max_user_watches:/proc/sys/fs/inotify/max_user_watches" \
+		--bind="${INSTALLED_ROOTFS_DIR}/${distro_name}/sys/.empty:/sys/fs/selinux" \
 		/usr/bin/env -i \
 			"HOME=/root" \
 			"LANG=C.UTF-8" \
 			"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
-			"TERM=$TERM" \
+			"TERM=${TERM-xterm-256color}" \
 			"TMPDIR=/tmp" \
 			"$@"
 }
 
-# A function for preparing fake content for certain /proc entries which are
-# known to have restricted access on Android OS. All entries are based on
-# values retrieved from Arch Linux (x86_64) running on a VM with 8 CPUs and 8
-# GiB of memory. Date 2023.03.28, Linux 6.2.1. Some values edited to fit
-# the PRoot-Distro.
-setup_fake_proc() {
-	mkdir -p "${INSTALLED_ROOTFS_DIR}/${distro_name}/proc"
-	chmod 700 "${INSTALLED_ROOTFS_DIR}/${distro_name}/proc"
+# A function for preparing fake content for certain system data interfaces
+# which known to be restricted on Android OS.
+#
+# All /proc entries are based on values retrieved from Arch Linux (x86_64)
+# running on a VM with 8 CPUs and 8 GiB of memory. Date 2023.03.28, Linux 6.2.1.
+# Some values edited to fit the PRoot-Distro.
+setup_fake_sysdata() {
+	local d
+	for d in proc sys sys/.empty; do
+		if [ ! -e "${INSTALLED_ROOTFS_DIR}/${distro_name}/${d}" ]; then
+			mkdir -p "${INSTALLED_ROOTFS_DIR}/${distro_name}/${d}"
+		fi
+		chmod 700 "${INSTALLED_ROOTFS_DIR}/${distro_name}/${d}"
+	done
+	unset d
 
 	if [ ! -f "${INSTALLED_ROOTFS_DIR}/${distro_name}/proc/.loadavg" ]; then
 		cat <<- EOF > "${INSTALLED_ROOTFS_DIR}/${distro_name}/proc/.loadavg"
@@ -1091,11 +979,19 @@ setup_fake_proc() {
 		40
 		EOF
 	fi
+
+	if [ ! -f "${INSTALLED_ROOTFS_DIR}/${distro_name}/proc/.sysctl_inotify_max_user_watches" ]; then
+		cat <<- EOF > "${INSTALLED_ROOTFS_DIR}/${distro_name}/proc/.sysctl_inotify_max_user_watches"
+		4096
+		EOF
+	fi
 }
 
 command_install_help() {
 	msg
 	msg "${BYELLOW}Usage: ${BCYAN}${PROGRAM_NAME} ${GREEN}install ${CYAN}[${GREEN}OPTIONS${CYAN}] [${GREEN}DISTRIBUTION ALIAS${CYAN}]${RST}"
+	msg
+	msg "${CYAN}Command aliases: ${GREEN}add${CYAN}, ${GREEN}i${CYAN}, ${GREEN}in${CYAN}, ${GREEN}ins${RST}"
 	msg
 	msg "${CYAN}Install a specified Linux distribution.${RST}"
 	msg
@@ -1168,7 +1064,7 @@ command_remove() {
 		msg
 		msg "${BRED}Error: unknown distribution '${YELLOW}${distro_name}${BRED}' was requested to be removed.${RST}"
 		msg
-		msg "${CYAN}Run '${GREEN}${PROGRAM_NAME} list${CYAN}' to see the supported distributions.${RST}"
+		msg "${CYAN}View supported distributions by: ${GREEN}${PROGRAM_NAME} list${RST}"
 		msg
 		return 1
 	fi
@@ -1202,6 +1098,8 @@ command_remove() {
 command_remove_help() {
 	msg
 	msg "${BYELLOW}Usage: ${BCYAN}${PROGRAM_NAME} ${GREEN}remove ${CYAN}[${GREEN}DISTRIBUTION ALIAS${CYAN}]${RST}"
+	msg
+	msg "${CYAN}Command aliases: ${GREEN}rm${RST}"
 	msg
 	msg "${CYAN}Remove a specified Linux distribution.${RST}"
 	msg
@@ -1315,7 +1213,7 @@ command_rename() {
 		msg
 		msg "${BRED}Error: unknown distribution '${YELLOW}${orig_distro_name}${BRED}' was requested to be renamed.${RST}"
 		msg
-		msg "${CYAN}Run '${GREEN}${PROGRAM_NAME} list${CYAN}' to see the supported distributions.${RST}"
+		msg "${CYAN}View supported distributions by: ${GREEN}${PROGRAM_NAME} list${RST}"
 		msg
 		return 1
 	fi
@@ -1362,12 +1260,14 @@ command_rename() {
 	msg "${BLUE}[${GREEN}*${BLUE}] ${CYAN}Updating PRoot link2symlink extension files (may take long time)...${RST}"
 	local symlink_file_name
 	find "${INSTALLED_ROOTFS_DIR}/${new_distro_name}" -type l | while read -r symlink_file_name; do
-		local symlink_current_target=$(readlink "$symlink_file_name")
+		local symlink_current_target
+		symlink_current_target=$(readlink "$symlink_file_name")
 		if [ "${symlink_current_target:0:${#INSTALLED_ROOTFS_DIR}}" != "${INSTALLED_ROOTFS_DIR}" ]; then
 			# Skip non-l2s symlinks.
 			continue
 		fi
-		local symlink_new_target=$(sed -E "s@(${INSTALLED_ROOTFS_DIR})/([^/]+)/(.*)@\1/${new_distro_name}/\3@g" <<< "$symlink_current_target")
+		local symlink_new_target
+		symlink_new_target=$(sed -E "s@(${INSTALLED_ROOTFS_DIR})/([^/]+)/(.*)@\1/${new_distro_name}/\3@g" <<< "$symlink_current_target")
 		ln -sf "$symlink_new_target" "$symlink_file_name"
 	done
 
@@ -1378,10 +1278,13 @@ command_rename_help() {
 	msg
 	msg "${BYELLOW}Usage: ${BCYAN}${PROGRAM_NAME} ${GREEN}rename ${CYAN}[${GREEN}ORIG ALIAS${CYAN}] [${GREEN}NEW ALIAS${CYAN}]${RST}"
 	msg
+	msg "${CYAN}Command aliases: ${GREEN}mv${RST}"
+	msg
 	msg "${CYAN}Rename a specified Linux distribution.${RST}"
 	msg
-	msg "${CYAN}Note that renaming default distribution will create a copy of${RST}"
-	msg "${CYAN}its plug-in.${RST}"
+	msg "${CYAN}Note that renaming default distribution will take a while${RST}"
+	msg "${CYAN}as PRoot-Distro has to update symlinks. If user renames a${RST}"
+	msg "${CYAN}default distribution, the plug-in copy will be created.${RST}"
 	msg
 	msg "${CYAN}Options:${RST}"
 	msg
@@ -1448,7 +1351,7 @@ command_reset() {
 		msg
 		msg "${BRED}Error: unknown distribution '${YELLOW}${distro_name}${BRED}' was requested to be reset.${RST}"
 		msg
-		msg "${CYAN}Run '${GREEN}${PROGRAM_NAME} list${CYAN}' to see the supported distributions.${RST}"
+		msg "${CYAN}View supported distributions by: ${GREEN}${PROGRAM_NAME} list${RST}"
 		msg
 		return 1
 	fi
@@ -1466,7 +1369,7 @@ command_reset() {
 
 command_reset_help() {
 	msg
-	msg "${BYELLOW}Usage: ${BCYAN}$PROGRAM_NAME ${GREEN}reset ${CYAN}[${GREEN}DISTRIBUTION ALIAS${CYAN}]${RST}"
+	msg "${BYELLOW}Usage: ${BCYAN}${PROGRAM_NAME} ${GREEN}reset ${CYAN}[${GREEN}DISTRIBUTION ALIAS${CYAN}]${RST}"
 	msg
 	msg "${CYAN}Reinstall the specified Linux distribution.${RST}"
 	msg
@@ -1505,7 +1408,11 @@ command_login() {
 	local no_link2symlink=false
 	local no_sysvipc=false
 	local no_kill_on_exit=false
+	local no_arch_warning=false
 	local login_user="root"
+	local login_wd=""
+	local -a login_env_vars
+	login_env_vars=("PATH=${DEFAULT_PATH_ENV}")
 	local kernel_release="${DEFAULT_FAKE_KERNEL_VERSION}"
 	local distro_name
 
@@ -1559,6 +1466,9 @@ command_login() {
 			--no-kill-on-exit)
 				no_kill_on_exit=true
 				;;
+			--no-arch-warning)
+				no_arch_warning=true
+				;;
 			--user)
 				if [ $# -ge 2 ]; then
 					shift 1
@@ -1593,6 +1503,44 @@ command_login() {
 				else
 					msg
 					msg "${BRED}Error: option '${YELLOW}$1${BRED}' requires an argument.${RST}"
+					command_login_help
+					return 1
+				fi
+				;;
+			--work-dir)
+				if [ $# -ge 2 ]; then
+					shift 1
+
+					if [ -z "$1" ]; then
+						msg
+						msg "${BRED}Error: argument to option '${YELLOW}--work-dir${BRED}' should not be empty.${RST}"
+						command_login_help
+						return 1
+					fi
+
+					login_wd="$1"
+				else
+					msg
+					msg "${BRED}Error: option '${YELLOW}--work-dir${BRED}' requires an argument.${RST}"
+					command_login_help
+					return 1
+				fi
+				;;
+			--env)
+				if [ $# -ge 2 ]; then
+					shift 1
+
+					if [ -z "$1" ]; then
+						msg
+						msg "${BRED}Error: argument to option '${YELLOW}--env${BRED}' should not be empty.${RST}"
+						command_login_help
+						return 1
+					fi
+
+					login_env_vars+=("$1")
+				else
+					msg
+					msg "${BRED}Error: option '${YELLOW}--env${BRED}' requires an argument.${RST}"
 					command_login_help
 					return 1
 				fi
@@ -1634,15 +1582,9 @@ command_login() {
 		msg
 		msg "${BRED}Error: unknown distribution '${YELLOW}${distro_name}${BRED}' was requested for logging in.${RST}"
 		msg
-		msg "${CYAN}Run '${GREEN}${PROGRAM_NAME} list${CYAN}' to see the supported distributions.${RST}"
+		msg "${CYAN}View supported distributions by: ${GREEN}${PROGRAM_NAME} list${RST}"
 		msg
 		return 1
-	fi
-
-	if grep -qiP '(kali|parrot|nethunter|blackarch)' <<< "$distro_name" || grep -qiP '^nh$' <<< "$distro_name"; then
-		# Redirect user to a safe distrubution.
-		msg "${BLUE}[${GREEN}*${BLUE}] ${CYAN}Distribution '${YELLOW}${distro_name}${CYAN}' known to be used by hax and therefore is not safe. Redirecting to '${YELLOW}ubuntu${CYAN}'...${RST}"
-		distro_name="ubuntu"
 	fi
 
 	if [ ! -d "${INSTALLED_ROOTFS_DIR}/${distro_name}" ]; then
@@ -1664,76 +1606,81 @@ command_login() {
 
 	# Catch invalid specified user before login command will be executed.
 	if ! grep -q "${login_user}:" "${INSTALLED_ROOTFS_DIR}/${distro_name}/etc/passwd" >/dev/null 2>&1; then
-		msg "${BRED}Error: no user '${login_user}' defined in /etc/passwd of distribution.${RST}"
+		msg "${BRED}Error: no user '${YELLOW}${login_user}${BRED}' defined in /etc/passwd of distribution.${RST}"
 		return 1
 	fi
 
 	local login_uid login_gid login_home login_shell
-	login_uid=$(grep "${login_user}:" "${INSTALLED_ROOTFS_DIR}/${distro_name}/etc/passwd" | cut -d ':' -f 3)
+	login_uid=$(grep "^${login_user}:" "${INSTALLED_ROOTFS_DIR}/${distro_name}/etc/passwd" | cut -d ':' -f 3)
 	if [ -z "${login_uid}" ]; then
-		msg "${BRED}Error: failed to retrieve the id of user '${login_user}' from /etc/passwd of distribution.${RST}"
+		msg "${BRED}Error: failed to retrieve the id of user '${YELLOW}${login_user}${BRED}' from /etc/passwd of distribution.${RST}"
 		return 1
 	fi
-	login_gid=$(grep "${login_user}:" "${INSTALLED_ROOTFS_DIR}/${distro_name}/etc/passwd" | cut -d ':' -f 4)
+	login_gid=$(grep "^${login_user}:" "${INSTALLED_ROOTFS_DIR}/${distro_name}/etc/passwd" | cut -d ':' -f 4)
 	if [ -z "${login_gid}" ]; then
-		msg "${BRED}Error: failed to retrieve the primary group id of user '${login_user}' from /etc/passwd of distribution.${RST}"
+		msg "${BRED}Error: failed to retrieve the primary group id of user '${YELLOW}${login_user}${BRED}' from /etc/passwd of distribution.${RST}"
 		return 1
 	fi
-	login_home=$(grep "${login_user}:" "${INSTALLED_ROOTFS_DIR}/${distro_name}/etc/passwd" | cut -d ':' -f 6)
+	login_home=$(grep "^${login_user}:" "${INSTALLED_ROOTFS_DIR}/${distro_name}/etc/passwd" | cut -d ':' -f 6)
 	if [ -z "${login_home}" ]; then
-		msg "${BRED}Error: failed to retrieve the home of user '${login_user}' from /etc/passwd of distribution.${RST}"
+		msg "${BRED}Error: failed to retrieve the home of user '${YELLOW}${login_user}${BRED}' from /etc/passwd of distribution.${RST}"
 		return 1
 	fi
-	login_shell=$(grep "${login_user}:" "${INSTALLED_ROOTFS_DIR}/${distro_name}/etc/passwd" | cut -d ':' -f 7)
+	if [ -z "${login_wd}" ]; then
+		login_wd="${login_home}"
+	fi
+	#if [ ! -d "$(realpath "${INSTALLED_ROOTFS_DIR}/${distro_name}/${login_wd}")" ]; then
+	#	msg "${BRED}Warning: cannot use path '${YELLOW}${login_wd}${BRED}' as working directory.${RST}"
+	#fi
+	login_shell=$(grep "^${login_user}:" "${INSTALLED_ROOTFS_DIR}/${distro_name}/etc/passwd" | cut -d ':' -f 7)
 	if [ -z "${login_shell}" ]; then
-		msg "${BRED}Error: failed to retrieve the shell of user '${login_user}' from /etc/passwd of distribution.${RST}"
+		msg "${BRED}Error: failed to retrieve the shell of user '${YELLOW}${login_user}${BRED}' from /etc/passwd of distribution.${RST}"
 		return 1
 	fi
 
-	local -a login_shell_args
+	# Update Android-specific variables in /etc/environment.
+	# Needed to handle changes after Android OS was upgraded.
+	chmod u+rw "${INSTALLED_ROOTFS_DIR}/${distro_name}/etc/environment" >/dev/null 2>&1 || true
+	for var in ANDROID_ART_ROOT ANDROID_DATA ANDROID_I18N_ROOT ANDROID_ROOT \
+		ANDROID_RUNTIME_ROOT ANDROID_TZDATA_ROOT BOOTCLASSPATH \
+		DEX2OATBOOTCLASSPATH; do
+		set +u
+		if [ -n "${!var}" ]; then
+			# Create new variable entry instead of editing as variable may
+			# not exist in the file.
+			sed -i "/^${var}=/d" "${INSTALLED_ROOTFS_DIR}/${distro_name}/etc/environment"
+			echo "${var}=${!var}" >> "${INSTALLED_ROOTFS_DIR}/${distro_name}/etc/environment"
+		fi
+		set -u
+	done
+	unset var
+ 
 	if [ $# -ge 1 ]; then
-		# Wrap in quotes each argument to prevent word splitting.
-		local -a login_shell_args
-		for i in "$@"; do
-			login_shell_args+=("'$i'")
-		done
-		set -- "-c" "${login_shell_args[*]}"
+		# Escape each argument to prevent word splitting.
+		set -- "-c" "$(printf " %q" "$@")"
 	else
 		set --
 	fi
 
-	# Hide variables specific to Termux (Android OS) when running in
-	# isolated mode.
-	local -a login_env_vars
-	if $isolated_environment; then
-		login_env_vars=(
-			"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-		)
-	else
-		login_env_vars=(
-			"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:@TERMUX_PREFIX@/bin:/system/bin:/system/xbin"
-		)
-
-		for var in ANDROID_ART_ROOT ANDROID_DATA ANDROID_I18N_ROOT ANDROID_ROOT \
-			ANDROID_RUNTIME_ROOT ANDROID_TZDATA_ROOT BOOTCLASSPATH \
-			DEX2OATBOOTCLASSPATH EXTERNAL_STORAGE; do
-			set +u
-			if [ -n "${!var}" ]; then
-				login_env_vars+=("${var}=${!var}")
-			fi
-			set -u
-		done
-		unset var
-	fi
+	for var in ANDROID_ART_ROOT ANDROID_DATA ANDROID_I18N_ROOT ANDROID_ROOT \
+		ANDROID_RUNTIME_ROOT ANDROID_TZDATA_ROOT BOOTCLASSPATH \
+		DEX2OATBOOTCLASSPATH EXTERNAL_STORAGE; do
+		set +u
+		if [ -n "${!var}" ]; then
+			login_env_vars+=("${var}=${!var}")
+		fi
+		set -u
+	done
+	unset var
 
 	# Handle /etc/environment.
 	if [ -e "${INSTALLED_ROOTFS_DIR}/${distro_name}/etc/environment" ]; then
 		mapfile -t -O "${#login_env_vars[@]}" login_env_vars < <(
-			sed -E \
-				-e "s/^([^=]+=)['\"]/\1/g" \
-				-e "s/['\"]\$//g" \
-				-e "/^[^=]+\$/d" \
-				"${INSTALLED_ROOTFS_DIR}/${distro_name}/etc/environment"
+			grep -P '^[A-Za-z_][A-Za-z0-9_]+=.+' "${INSTALLED_ROOTFS_DIR}/${distro_name}/etc/environment" | \
+				sed -E \
+					-e "s/^([^=]+=)['\"]/\1/g" \
+					-e "s/['\"]\$//g" \
+					-e "/^[^=]+\$/d"
 		)
 	fi
 
@@ -1741,85 +1688,114 @@ command_login() {
 	# environment variables will be inherited by shell.
 	set -- "/usr/bin/env" "-i" \
 		"${login_env_vars[@]}" \
-        "COLORTERM=${COLORTERM-}" \
+		"COLORTERM=${COLORTERM-}" \
 		"HOME=${login_home}" \
-		"LANG=en_US.UTF-8" \
-		"MOZ_FAKE_NO_SANDBOX=1" \
-		"PULSE_SERVER=127.0.0.1" \
+		"USER=${login_user}" \
 		"TERM=${TERM-xterm-256color}" \
-		"TMPDIR=/tmp" \
 		"${login_shell}" \
 		"-l" \
 		"$@"
 
 	set -- "--rootfs=${INSTALLED_ROOTFS_DIR}/${distro_name}" "$@"
 	set -- "--change-id=${login_uid}:${login_gid}" "$@"
-	set -- "--cwd=${login_home}" "$@"
+	set -- "--cwd=${login_wd}" "$@"
 
 	# Setup QEMU when CPU architecture do not match the one of device.
 	local target_arch
-	if [ -f "${DISTRO_PLUGINS_DIR}/${distro_name}.sh" ]; then
-		target_arch=$(. "${DISTRO_PLUGINS_DIR}/${distro_name}.sh"; echo "${DISTRO_ARCH}")
-	elif [ -f "${DISTRO_PLUGINS_DIR}/${distro_name}.override.sh" ]; then
-		target_arch=$(. "${DISTRO_PLUGINS_DIR}/${distro_name}.override.sh"; echo "${DISTRO_ARCH}")
-	else
-		# This should never happen.
-		msg
-		msg "${BRED}Error: missing plugin for distribution '${YELLOW}${distro_name}${BRED}'.${RST}"
-		msg
-		return 1
+	target_arch=$(detect_cpu_arch "${distro_name}")
+	if [ "$target_arch" = "unknown" ]; then
+		if [ -f "${DISTRO_PLUGINS_DIR}/${distro_name}.sh" ]; then
+			# shellcheck disable=SC1090
+			target_arch=$(. "${DISTRO_PLUGINS_DIR}/${distro_name}.sh"; echo "${DISTRO_ARCH}")
+		elif [ -f "${DISTRO_PLUGINS_DIR}/${distro_name}.override.sh" ]; then
+			# shellcheck disable=SC1090
+			target_arch=$(. "${DISTRO_PLUGINS_DIR}/${distro_name}.override.sh"; echo "${DISTRO_ARCH}")
+		else
+			# This should never happen.
+			msg
+			msg "${BRED}Error: missing plugin for distribution '${YELLOW}${distro_name}${BRED}'.${RST}"
+			msg
+			return 1
+		fi
 	fi
 
-	local need_qemu=false
+	local need_cpu_emulator=false
 	if [ "$target_arch" != "$DEVICE_CPU_ARCH" ]; then
-		local qemu_bin_path=""
-		need_qemu=true
+		local cpu_emulator_path=""
+		need_cpu_emulator=true
 
 		# If CPU and host OS are 64bit, we can run 32bit guest OS without emulation.
 		# Everything else requires emulator (QEMU).
 		case "$target_arch" in
-			aarch64) qemu_bin_path="@TERMUX_PREFIX@/bin/qemu-aarch64";;
+			aarch64) cpu_emulator_path="@TERMUX_PREFIX@/bin/qemu-aarch64";;
 			arm)
-				if [ "$DEVICE_CPU_ARCH" != "aarch64" ]; then
-					qemu_bin_path="@TERMUX_PREFIX@/bin/qemu-arm"
+				if [ "$DEVICE_CPU_ARCH" != "aarch64" ] || ! $SUPPORT_32BIT; then
+					cpu_emulator_path="@TERMUX_PREFIX@/bin/qemu-arm"
 				else
-					need_qemu=false
+					need_cpu_emulator=false
 				fi
 				;;
 			i686)
 				if [ "$DEVICE_CPU_ARCH" != "x86_64" ]; then
-					qemu_bin_path="@TERMUX_PREFIX@/bin/qemu-i386"
+					cpu_emulator_path="@TERMUX_PREFIX@/bin/qemu-i386"
 				else
-					need_qemu=false
+					need_cpu_emulator=false
 				fi
 				;;
-			x86_64) qemu_bin_path="@TERMUX_PREFIX@/bin/qemu-x86_64";;
+			riscv64) cpu_emulator_path="@TERMUX_PREFIX@/bin/qemu-riscv64";;
+			x86_64)
+				if [ "$PROOT_DISTRO_X64_EMULATOR" = "QEMU" ]; then
+					cpu_emulator_path="@TERMUX_PREFIX@/bin/qemu-x86_64"
+				elif [ "$PROOT_DISTRO_X64_EMULATOR" = "BLINK" ]; then
+					cpu_emulator_path="@TERMUX_PREFIX@/bin/blink"
+				else
+					msg
+					msg "${BRED}Error: PROOT_DISTRO_X64_EMULATOR has unknown value '${YELLOW}${PROOT_DISTRO_X64_EMULATOR}${BRED}'. Valid values are: BLINK, QEMU."
+					msg
+				fi
+				;;
 			*)
 				msg
-				msg "${BRED}Error: DISTRO_ARCH has unknown value '$target_arch'. Valid values are: aarch64, arm, i686, x86_64."
+				msg "${BRED}Error: DISTRO_ARCH has unknown value '${YELLOW}${target_arch}${BRED}'. Valid values are: aarch64, arm, i686, riscv64, x86_64."
 				msg
 				return 1
 			;;
 		esac
 
-		if [ -n "$qemu_bin_path" ]; then
-			if [ -x "$qemu_bin_path" ]; then
-				set -- "-q" "$qemu_bin_path" "$@"
+		if [ -n "$cpu_emulator_path" ]; then
+			if [ -x "$cpu_emulator_path" ]; then
+				set -- "-q" "$cpu_emulator_path" "$@"
 			else
-				local qemu_user_pkg=""
+				local cpu_emulator_pkg=""
 				case "$target_arch" in
-					aarch64) qemu_user_pkg="qemu-user-aarch64";;
-					arm) qemu_user_pkg="qemu-user-arm";;
-					i686) qemu_user_pkg="qemu-user-i386";;
-					x86_64) qemu_user_pkg="qemu-user-x86-64";;
-					*) qemu_user_pkg="qemu-user-$target_arch";;
+					aarch64) cpu_emulator_pkg="qemu-user-aarch64";;
+					arm) cpu_emulator_pkg="qemu-user-arm";;
+					i686) cpu_emulator_pkg="qemu-user-i386";;
+					riscv64) cpu_emulator_pkg="qemu-user-riscv64";;
+					x86_64)
+						if [ "$PROOT_DISTRO_X64_EMULATOR" = "QEMU" ]; then
+							cpu_emulator_pkg="qemu-user-x86-64"
+						elif [ "$PROOT_DISTRO_X64_EMULATOR" = "BLINK" ]; then
+							cpu_emulator_pkg="blink"
+						else
+							msg
+							msg "${BRED}Error: PROOT_DISTRO_X64_EMULATOR has unknown value '${YELLOW}${PROOT_DISTRO_X64_EMULATOR}${BRED}'. Valid values are: BLINK, QEMU."
+							msg
+						fi
+						;;
+					*) cpu_emulator_pkg="qemu-user-$target_arch";;
 				esac
 
 				msg
-				msg "${BRED}Error: package '${qemu_user_pkg}' is not installed.${RST}"
+				msg "${BRED}Error: package '${YELLOW}${cpu_emulator_pkg}${BRED}' is not installed.${RST}"
 				msg
 				return 1
 			fi
+		fi
+	else
+		# Warn about CPU not supporting 32-bit instructions
+		if ! $no_arch_warning && ! $SUPPORT_32BIT; then
+			msg "${BRED}Warning: CPU doesn't support 32-bit instructions, some software may not work.${RST}"
 		fi
 	fi
 
@@ -1828,7 +1804,7 @@ command_login() {
 		# proot can terminate freely.
 		set -- "--kill-on-exit" "$@"
 	else
-		msg "${BRED}Warning: option '--no-kill-on-exit' is enabled. When exiting, your session will be blocked until all processes are terminated.${RST}"
+		msg "${BRED}Warning: option '${YELLOW}--no-kill-on-exit${BRED}' is enabled. When exiting, your session will be blocked until all processes are terminated.${RST}"
 	fi
 
 	if ! $no_link2symlink; then
@@ -1858,37 +1834,34 @@ command_login() {
 	set -- "--bind=/proc/self/fd/2:/dev/stderr" "$@"
 	set -- "--bind=/sys" "$@"
 
-	# Ensure that we can bind fake /proc entries.
-	setup_fake_proc
+	# Ensure that we can bind fake /proc and /sys entries.
+	setup_fake_sysdata
 
-	# Fake /proc/loadavg if necessary.
+	# With this tools should assume that no SELinux present.
+	set -- "--bind=${INSTALLED_ROOTFS_DIR}/${distro_name}/sys/.empty:/sys/fs/selinux" "$@"
+
+	# Fake various /proc entries commonly used by programs unless read access
+	# available.
 	if ! cat /proc/loadavg > /dev/null 2>&1; then
 		set -- "--bind=${INSTALLED_ROOTFS_DIR}/${distro_name}/proc/.loadavg:/proc/loadavg" "$@"
 	fi
-
-	# Fake /proc/stat if necessary.
 	if ! cat /proc/stat > /dev/null 2>&1; then
 		set -- "--bind=${INSTALLED_ROOTFS_DIR}/${distro_name}/proc/.stat:/proc/stat" "$@"
 	fi
-
-	# Fake /proc/uptime if necessary.
 	if ! cat /proc/uptime > /dev/null 2>&1; then
 		set -- "--bind=${INSTALLED_ROOTFS_DIR}/${distro_name}/proc/.uptime:/proc/uptime" "$@"
 	fi
-
-	# Fake /proc/version if necessary.
 	if ! cat /proc/version > /dev/null 2>&1; then
 		set -- "--bind=${INSTALLED_ROOTFS_DIR}/${distro_name}/proc/.version:/proc/version" "$@"
 	fi
-
-	# Fake /proc/vmstat if necessary.
 	if ! cat /proc/vmstat > /dev/null 2>&1; then
 		set -- "--bind=${INSTALLED_ROOTFS_DIR}/${distro_name}/proc/.vmstat:/proc/vmstat" "$@"
 	fi
-
-	# Fake /proc/sys/kernel/cap_last_cap if necessary.
 	if ! cat /proc/sys/kernel/cap_last_cap > /dev/null 2>&1; then
 		set -- "--bind=${INSTALLED_ROOTFS_DIR}/${distro_name}/proc/.sysctl_entry_cap_last_cap:/proc/sys/kernel/cap_last_cap" "$@"
+	fi
+	if ! cat /proc/sys/fs/inotify/max_user_watches > /dev/null 2>&1; then
+		set -- "--bind=${INSTALLED_ROOTFS_DIR}/${distro_name}/proc/.sysctl_inotify_max_user_watches:/proc/sys/fs/inotify/max_user_watches" "$@"
 	fi
 
 	# Bind /tmp to /dev/shm.
@@ -1951,7 +1924,7 @@ command_login() {
 	fi
 
 	# When using QEMU, we need some host files even in isolated mode.
-	if ! $isolated_environment || $need_qemu; then
+	if ! $isolated_environment || $need_cpu_emulator; then
 		local system_mnt
 		for system_mnt in /apex /odm /product /system /system_ext /vendor \
 			/linkerconfig/ld.config.txt \
@@ -2024,7 +1997,9 @@ command_login() {
 
 command_login_help() {
 	msg
-	msg "${BYELLOW}Usage: ${BCYAN}$PROGRAM_NAME ${GREEN}login ${CYAN}[${GREEN}OPTIONS${CYAN}] [${GREEN}DISTRO ALIAS${CYAN}] [${GREEN}-- ${CYAN}[${GREEN}COMMAND${CYAN}]]${RST}"
+	msg "${BYELLOW}Usage: ${BCYAN}${PROGRAM_NAME} ${GREEN}login ${CYAN}[${GREEN}OPTIONS${CYAN}] [${GREEN}DISTRO ALIAS${CYAN}] [${GREEN}-- ${CYAN}[${GREEN}COMMAND${CYAN}]]${RST}"
+	msg
+	msg "${CYAN}Command aliases: ${GREEN}sh${RST}"
 	msg
 	msg "${CYAN}Launch a login shell for the specified distribution if no${RST}"
 	msg "${CYAN}additional arguments were given. Otherwise execute the${RST}"
@@ -2062,8 +2037,16 @@ command_login_help() {
 	msg "                         ${CYAN}before exiting. This will cause proot to${RST}"
 	msg "                         ${CYAN}freeze if you are running daemons.${RST}"
 	msg
+	msg "  ${GREEN}--no-arch-warning     ${CYAN}- Suppress warning about CPU not supporting 32-bit${RST}"
+	msg "                         ${CYAN}instructions.${RST}"
+	msg
 	msg "  ${GREEN}--kernel [string]    ${CYAN}- Set the kernel release and compatibility${RST}"
 	msg "                         ${CYAN}level to string.${RST}"
+	msg
+	msg "  ${GREEN}--work-dir [path]    ${CYAN}- Set the working directory.${RST}"
+	msg
+	msg "  ${GREEN}--env ENV=val        ${CYAN}- Set environment variable. Can be specified${RST}"
+	msg "                         ${CYAN}multiple times.${RST}"
 	msg
 	msg "${CYAN}Put '${GREEN}--${CYAN}' if you wish to stop command line processing and pass${RST}"
 	msg "${CYAN}options as shell arguments.${RST}"
@@ -2081,14 +2064,22 @@ command_login_help() {
 	msg
 	msg "${CYAN}This should be enough to get Termux utilities like termux-api or${RST}"
 	msg "${CYAN}termux-open get working. If they do not work for some reason,${RST}"
-	msg "${CYAN}check if these files are sourced by your shell:${RST}"
-	msg
-	msg "  ${CYAN}* ${YELLOW}/etc/profile.d/termux-proot.sh${RST}"
-	msg "  ${CYAN}* ${YELLOW}/etc/profile${RST}"
+	msg "${CYAN}make sure they are properly set in ${YELLOW}/etc/environment${CYAN}.${RST}"
 	msg
 	msg "${CYAN}Also check whether they define variables like ANDROID_DATA,${RST}"
 	msg "${CYAN}ANDROID_ROOT, BOOTCLASSPATH and others which are usually set${RST}"
 	msg "${CYAN}in Termux sessions.${RST}"
+	msg
+	msg "${CYAN}If issue occurs only after su/sudo use, then likely your PAM${RST}"
+	msg "${CYAN}configuration doesn't load ${YELLOW}/etc/environment${CYAN} and you need to fix${RST}"
+	msg "${CYAN}it by enabling pam_env.so in /etc/pam.d configuration.${RST}"
+	msg
+	msg "${CYAN}Example PAM configuration line:${RST}"
+	msg
+	msg "  ${GREEN}session  required  pam_env.so readenv=1${RST}"
+	msg
+	msg "${CYAN}You need to append it to ${YELLOW}/etc/pam.d/su${CYAN}, ${YELLOW}/etc/pam.d/sudo${CYAN} or other${RST}"
+	msg "${CYAN}file depending on distribution.${RST}"
 	msg
 	msg "${CYAN}Selected distribution should be referenced by alias which can be${RST}"
 	msg "${CYAN}obtained by this command: ${GREEN}${PROGRAM_NAME} list${RST}"
@@ -2107,33 +2098,98 @@ command_login_help() {
 #############################################################################
 
 command_list() {
+	local verbose=false
+
+	while (($# >= 1)); do
+		case "$1" in
+			-h|--help)
+				command_list_help
+				return 0
+				;;
+			-v|--verbose)
+				verbose=true
+				;;
+			-*)
+				msg
+				msg "${BRED}Error: got unknown option '${YELLOW}${1}${BRED}'.${RST}"
+				command_list_help
+				return 1
+				;;
+			*)
+				msg
+				msg "${BRED}Error: got excessive positional argument '${YELLOW}${1}${BRED}'.${RST}"
+				command_list_help
+				return 1
+				;;
+		esac
+		shift 1
+	done
+
 	msg
 	if [ -z "${!SUPPORTED_DISTRIBUTIONS[*]}" ]; then
 		msg "${YELLOW}No distribution plug-ins found.${RST}"
 		msg
 		msg "${YELLOW}Please check the directory '${DISTRO_PLUGINS_DIR}' and create at least one distribution plug-in.${RST}"
 	else
-		msg "${CYAN}Supported distributions:${RST}"
+		if $verbose; then
+			msg "${CYAN}Supported distributions:${RST}"
+		else
+			msg "${CYAN}Supported distributions (format: name < alias >):${RST}"
+			msg
+		fi
 
 		local i
 		for i in $(echo "${!SUPPORTED_DISTRIBUTIONS[@]}" | tr ' ' '\n' | sort -d); do
-			msg
-			msg "  ${CYAN}* ${YELLOW}${SUPPORTED_DISTRIBUTIONS[$i]}${RST}"
-			msg
-			msg "    ${CYAN}Alias: ${YELLOW}${i}${RST}"
-			if [ -d "${INSTALLED_ROOTFS_DIR}/${i}" ]; then
-				msg "    ${CYAN}Installed: ${GREEN}yes${RST}"
+			if $verbose; then
+				msg
+				msg "  ${CYAN}* ${YELLOW}${SUPPORTED_DISTRIBUTIONS[$i]}${RST}"
+				msg
+				msg "    ${CYAN}Alias: ${GREEN}${i}${RST}"
+				if [ -d "${INSTALLED_ROOTFS_DIR}/${i}" ]; then
+					msg "    ${CYAN}Installed: ${GREEN}yes${RST}"
+				else
+					msg "    ${CYAN}Installed: ${RED}no${RST}"
+				fi
+				if [ -n "${SUPPORTED_DISTRIBUTIONS_COMMENTS["${i}"]+x}" ]; then
+					msg "    ${CYAN}Comment: ${SUPPORTED_DISTRIBUTIONS_COMMENTS["${i}"]}${RST}"
+				fi
+
+				local supported_cpus
+				if [ -f "${DISTRO_PLUGINS_DIR}/${i}.sh" ]; then
+					supported_cpus=$(source "${DISTRO_PLUGINS_DIR}/${i}.sh"; echo "${!TARBALL_URL[@]}")
+				elif [ -f "${DISTRO_PLUGINS_DIR}/${i}.override.sh" ]; then
+					supported_cpus=$(source "${DISTRO_PLUGINS_DIR}/${i}.override.sh"; echo "${!TARBALL_URL[@]}")
+				else
+					supported_cpus="no data"
+				fi
+
+				msg "    ${CYAN}Architectures: ${supported_cpus// /, }${RST}"
 			else
-				msg "    ${CYAN}Installed: ${RED}no${RST}"
-			fi
-			if [ -n "${SUPPORTED_DISTRIBUTIONS_COMMENTS["${i}"]+x}" ]; then
-				msg "    ${CYAN}Comment: ${SUPPORTED_DISTRIBUTIONS_COMMENTS["${i}"]}${RST}"
+				msg "  ${CYAN}* ${YELLOW}${SUPPORTED_DISTRIBUTIONS[$i]} ${GREEN}< $i >${RST}"
 			fi
 		done
 
 		msg
 		msg "${CYAN}Install selected one with: ${GREEN}${PROGRAM_NAME} install <alias>${RST}"
 	fi
+	msg
+}
+
+command_list_help() {
+	msg
+	msg "${BYELLOW}Usage: ${BCYAN}${PROGRAM_NAME} ${GREEN}list${RST}"
+	msg
+	msg "${CYAN}Command aliases: ${GREEN}ls${RST}"
+	msg
+	msg "${CYAN}List distributions and their properties.${RST}"
+	msg
+	msg "${CYAN}Options:${RST}"
+	msg
+	msg "  ${GREEN}--help               ${CYAN}- Show this help information.${RST}"
+	msg
+	msg "  ${GREEN}--verbose            ${CYAN}- Detailed output.${RST}"
+	msg
+	show_version
 	msg
 }
 
@@ -2212,15 +2268,9 @@ command_backup() {
 		msg
 		msg "${BRED}Error: unknown distribution '${YELLOW}${distro_name}${BRED}' was requested for backup.${RST}"
 		msg
-		msg "${CYAN}Run '${GREEN}${PROGRAM_NAME} list${CYAN}' to see the supported distributions.${RST}"
+		msg "${CYAN}View supported distributions by: ${GREEN}${PROGRAM_NAME} list${RST}"
 		msg
 		return 1
-	fi
-
-	if grep -qiP '(kali|parrot|nethunter|blackarch)' <<< "$distro_name" || grep -qiP '^nh$' <<< "$distro_name"; then
-		# Redirect user to a safe distrubution.
-		msg "${BLUE}[${GREEN}*${BLUE}] ${CYAN}Distribution '${YELLOW}${distro_name}${CYAN}' known to be used by hax and therefore is not safe. Redirecting to '${YELLOW}ubuntu${CYAN}'...${RST}"
-		distro_name="ubuntu"
 	fi
 
 	if [ ! -d "${INSTALLED_ROOTFS_DIR}/${distro_name}" ]; then
@@ -2290,7 +2340,9 @@ command_backup() {
 
 	msg "${BLUE}[${GREEN}*${BLUE}] ${CYAN}Archiving the rootfs and plug-in...${RST}"
 	if [ -n "${tarball_file_path-}" ]; then
+		# shellcheck disable=SC2064 # variables must expand here
 		trap "echo -e \"\\r\\e[2K${BLUE}[${RED}!${BLUE}] ${CYAN}Exiting due to failure.${RST}\"; rm -f \"${tarball_file_path:?}\"; exit 1;" EXIT
+		# shellcheck disable=SC2064 # variables must expand here
 		trap "trap - EXIT; echo -e \"\\r\\e[2K${BLUE}[${RED}!${BLUE}] ${CYAN}Exiting immediately as requested.${RST}\"; rm -f \"${tarball_file_path:?}\"; exit 1;" HUP INT TERM
 		tar -c --auto-compress \
 			--warning=no-file-ignored \
@@ -2310,7 +2362,9 @@ command_backup() {
 
 command_backup_help() {
 	msg
-	msg "${BYELLOW}Usage: ${BCYAN}$PROGRAM_NAME ${GREEN}backup ${CYAN}[${GREEN}DISTRIBUTION ALIAS${CYAN}]${RST}"
+	msg "${BYELLOW}Usage: ${BCYAN}${PROGRAM_NAME} ${GREEN}backup ${CYAN}[${GREEN}DISTRIBUTION ALIAS${CYAN}]${RST}"
+	msg
+	msg "${CYAN}Command aliases: ${GREEN}bak${CYAN}, ${GREEN}bkp${RST}"
 	msg
 	msg "${CYAN}Back up a specified distribution installation into tarball.${RST}"
 	msg
@@ -2409,7 +2463,7 @@ command_restore() {
 	local success
 	msg "${BLUE}[${GREEN}*${BLUE}] ${CYAN}Extracting distribution plug-in and rootfs from the tarball...${RST}"
 	if [ -n "${tarball_file_path-}" ]; then
-		if mkdir -m 755 -p "${INSTALLED_ROOTFS_DIR}" && tar -x --auto-compress -f "$tarball_file_path" \
+		if mkdir -p "${INSTALLED_ROOTFS_DIR}" && tar -x --auto-compress -f "$tarball_file_path" \
 			--recursive-unlink --preserve-permissions \
 			-C "${DISTRO_PLUGINS_DIR}/../" "$(basename "${DISTRO_PLUGINS_DIR}")/" \
 			-C "${INSTALLED_ROOTFS_DIR}/../" "$(basename "${INSTALLED_ROOTFS_DIR}")/"; then
@@ -2418,7 +2472,7 @@ command_restore() {
 			success=false
 		fi
 	else
-		if mkdir -m 755 -p "${INSTALLED_ROOTFS_DIR}" && tar -x --recursive-unlink --preserve-permissions \
+		if mkdir -p "${INSTALLED_ROOTFS_DIR}" && tar -x --recursive-unlink --preserve-permissions \
 			-C "${DISTRO_PLUGINS_DIR}/../" "$(basename "${DISTRO_PLUGINS_DIR}")/" \
 			-C "${INSTALLED_ROOTFS_DIR}/../" "$(basename "${INSTALLED_ROOTFS_DIR}")/"; then
 			success=true
@@ -2491,7 +2545,6 @@ command_clear_cache() {
 				return 1
 				;;
 		esac
-		shift 1
 	done
 
 	if ! ls -la "${DOWNLOAD_CACHE_DIR}"/* > /dev/null 2>&1; then
@@ -2518,6 +2571,8 @@ command_clear_cache_help() {
 	msg
 	msg "${BYELLOW}Usage: ${BCYAN}${PROGRAM_NAME} ${GREEN}clear-cache${RST}"
 	msg
+	msg "${CYAN}Command aliases: ${GREEN}clear${CYAN}, ${GREEN}cl${RST}"
+	msg
 	msg "${CYAN}Remove all cached rootfs tarballs to reclaim disk space.${RST}"
 	msg
 	show_version
@@ -2541,7 +2596,7 @@ command_help() {
 	msg "${CYAN}a set of functions with standardized command line interface${RST}"
 	msg "${CYAN}to let user easily manage Linux PRoot containers. By default${RST}"
 	msg "${CYAN}it supports a number of well known Linux distributions such${RST}"
-	msg "${CYAN}Alpine Linux, Debian or OpenSUSE. However it is possible to${RST}"
+	msg "${CYAN}Alpine Linux, Debian or openSUSE. However it is possible to${RST}"
 	msg "${CYAN}add others with a help of plug-ins.${RST}"
 	msg
 	msg "${CYAN}List of the available commands:${RST}"
@@ -2578,7 +2633,8 @@ command_help() {
 	msg "${CYAN}command to install it: ${GREEN}${PROGRAM_NAME} install <alias>${RST}"
 	msg
 	msg "${CYAN}Runtime data is stored at this location:${RST}"
-	msg "${CYAN}${RUNTIME_DIR}${RST}"
+	msg
+	msg "${YELLOW}  ${RUNTIME_DIR}${RST}"
 	msg
 	msg "${CYAN}If you have issues with proot during installation or login, try${RST}"
 	msg "${CYAN}to set '${GREEN}PROOT_NO_SECCOMP=1${CYAN}' environment variable.${RST}"
@@ -2597,7 +2653,7 @@ command_help() {
 #############################################################################
 
 show_version() {
-	msg "${ICYAN}Proot-Distro v${PROGRAM_VERSION} by Termux.${RST}"
+	msg "${ICYAN}Proot-Distro v${PROGRAM_VERSION} by Termux (@sylirre).${RST}"
 }
 
 #############################################################################
@@ -2620,7 +2676,8 @@ case "$(uname -m)" in
 	armv7l|armv8l) DEVICE_CPU_ARCH="arm";;
 	*) DEVICE_CPU_ARCH=$(uname -m);;
 esac
-DISTRO_ARCH=$DEVICE_CPU_ARCH
+DISTRO_ARCH=${DISTRO_ARCH:-}
+if [ -z "$DISTRO_ARCH" ]; then DISTRO_ARCH="${DEVICE_CPU_ARCH}"; fi
 
 # Verify architecture if possible - avoid running under linux32 or similar.
 if [ -x "@TERMUX_PREFIX@/bin/dpkg" ]; then
@@ -2632,11 +2689,19 @@ if [ -x "@TERMUX_PREFIX@/bin/dpkg" ]; then
 	fi
 fi
 
+# Check if architecture supports 32-bit instructions.
+SUPPORT_32BIT=true
+if grep -q "CPU op-mode" <(lscpu) 2>/dev/null && ! grep -qE 'CPU op-mode\(s\):.*32-bit' <(lscpu) 2>/dev/null; then
+	SUPPORT_32BIT=false
+fi
+
 declare -A TARBALL_URL TARBALL_SHA256
 declare -A SUPPORTED_DISTRIBUTIONS
 declare -A SUPPORTED_DISTRIBUTIONS_COMMENTS
 while read -r filename; do
+	# shellcheck disable=SC1090
 	distro_name=$(. "$filename"; echo "${DISTRO_NAME-}")
+	# shellcheck disable=SC1090
 	distro_comment=$(. "$filename"; echo "${DISTRO_COMMENT-}")
 	# May have 2 name formats:
 	# * alias.override.sh
@@ -2657,26 +2722,30 @@ while read -r filename; do
 
 	SUPPORTED_DISTRIBUTIONS["$distro_alias"]="$distro_name"
 	[ -n "$distro_comment" ] && SUPPORTED_DISTRIBUTIONS_COMMENTS["$distro_alias"]="$distro_comment"
-done < <(find "$DISTRO_PLUGINS_DIR" -maxdepth 1 -type f -iname "*.sh" 2>/dev/null)
+done < <(find "$DISTRO_PLUGINS_DIR" -maxdepth 1 \( -type f -o -type l \) -iname "*.sh" 2>/dev/null)
 unset distro_name distro_alias
 
 if [ $# -ge 1 ]; then
 	case "$1" in
-		-h|--help|help) shift 1; command_help;;
-		backup) shift 1; command_backup "$@";;
-		install) shift 1; command_install "$@";;
-		list) shift 1; command_list;;
-		login) shift 1; command_login "$@";;
-		remove) shift 1; CMD_REMOVE_REQUESTED_RESET="false" command_remove "$@";;
-		rename) shift 1; command_rename "$@";;
-		clear-cache) shift 1; command_clear_cache "$@";;
+		-h|--help|help|hel|he|h) shift 1; command_help;;
+		backup|bak|bkp) shift 1; command_backup "$@";;
+		install|i|in|ins|add) shift 1; command_install "$@";;
+		list|li|ls) shift 1; command_list "$@";;
+		login|sh) shift 1; command_login "$@";;
+		remove|rm) shift 1; CMD_REMOVE_REQUESTED_RESET="false" command_remove "$@";;
+		rename|mv) shift 1; command_rename "$@";;
+		clear-cache|clear|cl) shift 1; command_clear_cache "$@";;
+
+		# Not implementing aliases as they could be confusing.
+		# We don't have many choices for these two commands: r, re, res, rst.
 		reset) shift 1; command_reset "$@";;
 		restore) shift 1; command_restore "$@";;
+
 		*)
 			msg
-			msg "${BRED}Error: unknown command '${YELLOW}$1${BRED}'.${RST}"
+			msg "${BRED}Error: unknown command '${YELLOW}${1}${BRED}'.${RST}"
 			msg
-			msg "${CYAN}Run '${GREEN}${PROGRAM_NAME} help${CYAN}' to see the list of available commands.${RST}"
+			msg "${CYAN}View supported commands by: ${GREEN}${PROGRAM_NAME} help${CYAN}${RST}"
 			msg
 			exit 1
 			;;

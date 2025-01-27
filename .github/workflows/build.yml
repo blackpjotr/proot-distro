@@ -21,7 +21,7 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
       - name: Gather distributions that is needed to be built
@@ -53,42 +53,49 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -yq curl debian-archive-keyring jq mmdebstrap qemu-user-static binfmt-support
       - name: Build distribution rootfs
         run: |
-          for distros_to_be_built in $(cat ./distributions.txt); do
-            # check if a specified distribution build recipe exists incase for workflow dispatch inputs
-            if [ ! -f ./distro-build/${distros_to_be_built}.sh ]; then
-              echo "Cannot build distribution ${distros_to_be_built}: no such file or directory"
+          distros_to_be_built=$(cat ./distributions.txt)
+          for d in ${distros_to_be_built}; do
+            # check if a specified distribution build recipe exists in case for workflow dispatch inputs
+            if [ ! -f ./distro-build/${d}.sh ]; then
+              echo "Cannot build distribution ${d}: ./distro-build/${d}.sh: no such file exist"
               exit 2
             fi
-            ./bootstrap-rootfs.sh ${distros_to_be_built}
           done
+          ./bootstrap-rootfs.sh ${distros_to_be_built}
       # Upload Artifacts separately per architecture
       - name: Upload Artifacts (aarch64)
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: built-rootfs-aarch64
           path: rootfs/*aarch64*.tar.xz
           if-no-files-found: ignore
       - name: Upload Artifacts (arm)
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: built-rootfs-arm
           path: rootfs/*arm*.tar.xz
           if-no-files-found: ignore
       - name: Upload Artifacts (i686)
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: built-rootfs-i686
           path: rootfs/*i686*.tar.xz
           if-no-files-found: ignore
+      - name: Upload Artifacts (riscv64)
+        uses: actions/upload-artifact@v4
+        with:
+          name: built-rootfs-riscv64
+          path: rootfs/*riscv64*.tar.xz
+          if-no-files-found: ignore
       - name: Upload Artifacts (x86_64)
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: built-rootfs-x86_64
           path: rootfs/*x86_64*.tar.xz
           if-no-files-found: ignore
       # Upload distro plugins
       - name: Upload Artifacts (distro plugins)
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: distro-plugins
           path: distro-plugins/*.sh
